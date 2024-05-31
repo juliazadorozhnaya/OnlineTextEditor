@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Online Text Editor</title>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+        #header {
+            width: 100%;
+            height: 40px;
+            background-color: #f1f1f1;
+            border-bottom: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            box-sizing: border-box;
+        }
+        #timer {
+            font-size: 16px;
+            font-weight: bold;
+        }
+        #editor {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        #editorContainer {
+            flex: 1;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 0;
+            border: none;
+            resize: none;
+            font-size: 16px;
+        }
+        #footer {
+            height: 100px;
+            background-color: #f1f1f1;
+            border-top: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        #fontControls {
+            display: flex;
+            align-items: center;
+            flex-grow: 1; /* Ensures it takes up the necessary space */
+        }
+        #fontControls button, #fontControls select {
+            margin: 0 5px;
+            padding: 5px 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #languageSelector {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: white;
+        }
+        #users {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: flex-end;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+        .user {
+            display: inline-block;
+            background-color: #ddd;
+            padding: 5px 10px;
+            margin: 5px;
+            border-radius: 5px;
+            color: white;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<div id="header">
+    <div id="timer">00:00:00</div>
+</div>
+<div id="editor">
+    <div id="editorContainer">{{.Text}}</div>
+</div>
+<div id="footer">
+    <div id="fontControls">
+        <button id="decreaseFont">-</button>
+        <span id="currentFontSize">16</span>
+        <button id="increaseFont">+</button>
+        <select id="languageSelector">
+            <option value="golang">Go</option>
+            <option value="python">Python</option>
+            <option value="sql">SQL</option>
+        </select>
+    </div>
+    <div id="users"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/mode-python.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/mode-sql.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/mode-golang.js"></script>
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+
+<script>
+    $(function(){
+        var editor = ace.edit("editorContainer");
+        editor.setTheme("ace/theme/github");
+        editor.session.setMode("ace/mode/golang");
+
+        var socket = null;
+        var users = $("#users");
+        var isUpdating = false;
+        var currentFontSize = 16;
+        var userCursors = {};
+        var sessionId = Math.random().toString(36).substring(2);
+
+        function stringToColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            let color = '#';
+            for (let i = 0; i < 3; i++) {
+                const value = (hash >> (i * 8)) & 0xFF;
+                color += ('00' + value.toString(16)).substr(-2);
+            }
+            return color;
+        }
+
+        function updateFontSize() {
+            editor.setFontSize(currentFontSize);
+            $("#currentFontSize").text(currentFontSize);
+        }
+
+        function sendFontSize() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({type: "fontSize", fontSize: currentFontSize}));
+            }
+        }
+
+        $("#increaseFont").click(function() {
+            currentFontSize += 1;
+            updateFontSize();
+            sendFontSize();
+        });
+
+        $("#decreaseFont").click(function() {
+            if (currentFontSize > 8) {
+                currentFontSize -= 1;
+                updateFontSize();
+                sendFontSize();
+            }
+        });
+
+        $("#languageSelector").change(function() {
+            var language = $(this).val();
+            var mode = "ace/mode/" + language;
+            editor.session.setMode(mode);
+        });
+
+        function startTimer(roomID) {
+            var startTimeKey = "startTime_" + roomID;
+            var startTime = localStorage.getItem(startTimeKey);
+            if (!startTime) {
+                startTime = Date.now();
+                localStorage.setItem(startTimeKey, startTime);
+            }
+
+            setInterval(function() {
+                var elapsedTime = Date.now() - startTime;
+                var hours = Math.floor(elapsedTime / 3600000);
+                var minutes = Math.floor((elapsedTime % 3600000) / 60000);
+                var seconds = Math.floor((elapsedTime % 60000) / 1000);
+                $("#timer").text(
+                    ("0" + hours).slice(-2) + ":" +
+                    ("0" + minutes).slice(-2) + ":" +
+                    ("0" + seconds).slice(-2)
+                );
+            }, 1000);
+        }
+
+        editor.getSession().on('changeCursor', function() {
+            sendCursorPosition();
+        });
+
+        function sendEditorContent() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({type: "text", text: editor.getValue(), sessionId: sessionId}));
+            }
+        }
+
+        function sendCursorPosition() {
+            var position = editor.getCursorPosition();
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({type: "cursor", position: position, sessionId: sessionId}));
+            }
+        }
+
+        function sendSelection() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                var range = editor.getSelectionRange();
+                socket.send(JSON.stringify({type: "selection", range: range, sessionId: sessionId}));
+            }
+        }
+
+        function updateCursor(username, sessionId, position) {
+            var uniqueId = username + "_" + sessionId;
+            if (userCursors[uniqueId]) {
+                editor.session.removeMarker(userCursors[uniqueId]);
+            }
+            var Range = ace.require("ace/range").Range;
+            var range = new Range(position.row, position.column, position.row, position.column + 1);
+            userCursors[uniqueId] = editor.session.addMarker(range, "ace_active-cursor", "userCursor");
+        }
+
+        function updateSelection(username, sessionId, range) {
+            var uniqueId = username + "_" + sessionId;
+            if (userCursors[uniqueId]) {
+                editor.session.removeMarker(userCursors[uniqueId]);
+            }
+            var Range = ace.require("ace/range").Range;
+            var selectionRange = new Range(range.start.row, range.start.column, range.end.row, range.end.column);
+            userCursors[uniqueId] = editor.session.addMarker(selectionRange, "ace_selection", "userSelection");
+        }
+
+        if (!window["WebSocket"]) {
+            alert("Your browser does not support WebSockets.");
+            return;
+        }
+
+        var roomID = "{{.RoomID}}";  // Это значение должно быть передано со стороны сервера
+        var host = "ws://" + window.location.host + "/ws/" + roomID;
+        socket = new WebSocket(host);
+        socket.onclose = function() {
+            alert("Connection closed. Please reload the page.");
+        };
+        socket.onmessage = function(e) {
+            var data = JSON.parse(e.data);
+            if (data.type === "text" && data.sessionId !== sessionId) {
+                isUpdating = true;
+                var cursorPosition = editor.getCursorPosition();
+                editor.setValue(data.text, -1);
+                editor.moveCursorToPosition(cursorPosition);
+                isUpdating = false;
+            } else if (data.type === "users") {
+                users.empty();
+                data.users.forEach(function(user) {
+                    var userColor = stringToColor(user);
+                    users.append('<span class="user" style="background-color: ' + userColor + ';">' + user + '</span>');
+                });
+            } else if (data.type === "fontSize") {
+                currentFontSize = data.fontSize;
+                updateFontSize();
+            } else if (data.type === "cursor" && data.sessionId !== sessionId) {
+                updateCursor(data.username, sessionId, data.position);
+            } else if (data.type === "selection" && data.sessionId !== sessionId) {
+                updateSelection(data.username, sessionId, data.range);
+            }
+        };
+        socket.onopen = function() {
+            sendEditorContent();  // Send initial content to synchronize
+            editor.getSession().on('changeCursor', function() {
+                sendCursorPosition();
+            });
+            editor.getSession().selection.on('changeSelection', function() {
+                sendSelection();
+            });
+            startTimer(roomID);  // Start the timer when WebSocket connection is established
+            sendFontSize();  // Send initial font size to synchronize
+        };
+    });
+</script>
+</body>
+</html>

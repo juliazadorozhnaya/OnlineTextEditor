@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Online Text Editor</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+    #container {
+      text-align: center;
+    }
+    #loginForm {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+<div id="container">
+  <button id="createRoomBtn">Create Room</button>
+  <div id="loginForm">
+    <h1>Enter your name</h1>
+    <form action="/login" method="post">
+      <label for="username">Username:</label>
+      <input type="text" id="username" name="username" required>
+      <button type="submit">Login</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  document.getElementById('createRoomBtn').addEventListener('click', function() {
+    document.getElementById('createRoomBtn').style.display = 'none';
+    document.getElementById('loginForm').style.display = 'block';
+  });
+</script>
+</body>
+</html>
