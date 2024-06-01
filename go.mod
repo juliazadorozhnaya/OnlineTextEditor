@@ -1,6 +1,6 @@
-module github.com/hokita/online_text_editor
+module github.com/juliazadorozhnaya/OnlineTextEditor
 
-go 1.14
+go 1.19
 
 require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
@@ -9,3 +9,5 @@ require (
 	github.com/gorilla/sessions v1.2.2
 	github.com/gorilla/websocket v1.4.2
 )
+
+require github.com/gorilla/securecookie v1.1.2 // indirect
